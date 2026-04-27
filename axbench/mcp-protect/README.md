@@ -1,128 +1,98 @@
-# MCP-Protect: HyperSteer (Gemma, Neuronpedia, `mcpattack.jsonl`)
+# `mcp-protect/` (AxBench)
 
-This folder holds **this monorepo’s** pipeline to merge GemmaScope / Neuronpedia concepts with `mcpattack.jsonl`, run AxBench `generate.py` and `train.py` for **HyperSteer**, and **serve** an OpenAI-compatible **policy** for **prime-envs** `vf-eval` (see [../../../../prime-envs/README.md](../../../../prime-envs/README.md)). The goal is to add integration here without forking `axbench/models` more than necessary.
+This directory adds a **self-contained pipeline** for this monorepo:
 
-**End-to-end story** (env vars, train → serve → `vf-eval` copy-paste): [README.md at the repository root](../../../../README.md).
+1. **`mcp_hypersteer.py`** — merge Neuronpedia / GemmaScope JSON with optional `mcpattack.jsonl`, write **`mcp_hypersteer_config.yaml`**, then call stock AxBench **`generate.py`** (remote LM for synthetic training text) and **`train.py`** (HyperSteer on **local** Gemma).
+2. **`serve_mcp_hypersteer.py`** — after training, load that run and expose **`POST /v1/chat/completions`** so **prime-envs** `vf-eval` can use **`-b http://…/v1`**.
 
----
-
-## What’s in this directory
-
-| File | Role |
-|------|------|
-| `mcp_hypersteer.py` | Merge → `generate` → `torchrun train` (subprocesses: `axbench/scripts/generate.py` and `train.py`). |
-| `serve_mcp_hypersteer.py` | `POST /v1/chat/completions` for a trained run; prints a `http://…/v1` base URL. |
-
-The rest of this file is the **full** guide (prereqs, install, examples, and CLI reference) — a single place for how to run everything here.
+**Monorepo context:** [README at repo root](../../../../README.md) (axbench + prime-envs). **Shell:** all `python` paths below are from the **AxBench project root** (the directory that contains the inner `axbench/` package, e.g. `…/mcp-protect/axbench/`).
 
 ---
 
-## Where to run commands
+## 1. Environment
 
-Use the **AxBench project root**: the directory that **contains** the inner `axbench/` package and this `mcp-protect/` folder (e.g. `…/mcp-protect/axbench/` if the clone is `mcp-protect`). From there:
+- **Python / AxBench:** use an env with **PyTorch** (CUDA for train/serve), **transformers**, and AxBench dependencies (see upstream `axbench` / your `pyproject` or conda env).
+- **HuggingFace:** `huggingface-cli login` to pull **Gemma** (`google/gemma-2-2b-it` or `9b-it`).
+- **Remote LM for `generate` (default `gpt-4o-mini` in the YAML):** set **`OPENAI_API_KEY`**. This only builds **training data**, not the `vf-eval` policy.
+- **Optional HTTP server deps** (for `serve_mcp_hypersteer.py` only), from the **mcp-protect** repo root:
 
-```bash
-export OPENAI_API_KEY=...  # for generate if the generated YAML still uses a remote LM
-python axbench/mcp-protect/mcp_hypersteer.py --model gemma2b --layer 20 --dump-dir axbench/outputs/mcp_hsteer_2b
-```
+  `pip install -r axbench/axbench/mcp-protect/requirements-serve.txt`
 
-Paths like `axbench/mcp-protect/...` and `axbench/outputs/...` are **relative to that** AxBench project root.
+- **Submodule (if `axbench` is a submodule):** `git submodule update --init --recursive`
 
 ---
 
-## Prerequisites
+## 2. Download data
 
-- **GPU:** CUDA is expected for training and for `serve_mcp_hypersteer`. Check `nvidia-smi` and use a **PyTorch** build that matches your driver (see [pytorch.org](https://pytorch.org)).
-- **HuggingFace:** `huggingface-cli login` (or `HUGGINGFACE_HUB_TOKEN`) for `google/gemma-2-2b-it` / `9b-it`.
-- **Data generation:** the generated config defaults to `lm_model: gpt-4o-mini` — set **`OPENAI_API_KEY`**. This is only for **training data**, not the `vf-eval` **policy**.
+- **Neuronpedia / GemmaScope JSON** (per model size), e.g. from `axbench/data/`:
+  - `bash axbench/data/download-2b.sh` or `download-9b.sh` (or your own file; pass `--base-concept-json` if not using the default name).
+- **Optional:** [../data/mcpattack.jsonl](../data/mcpattack.jsonl) — extra steering lines merged into the same concept list (omit with `--no-mcp` or if the file is missing).
 
-## Will the commands actually run?
+---
 
-| Step | Machine | Without GPU? |
-|------|----------|--------------|
-| Merge + YAML in `mcp_hypersteer.py` | CPU | **Yes** with `--skip-generate`. |
-| `generate.py` | needs remote LM | **`OPENAI_API_KEY`** (default). |
-| `train.py` (HyperSteer) | CUDA expected | **No** for a realistic run. |
-| `serve_mcp_hypersteer.py` | CUDA | **No** as configured here. |
+## 3. Test YAML + merge only (no API, no GPU training)
 
-`torchrun` sets **process rank** for training. `predict_steer` can call `torch.distributed.get_rank()`; the server pre-initializes a **1-process `gloo` group** so you do not need to patch `axbench/models/hypersteer.py` for that.
-
-## Repo layout and submodule
-
-```bash
-git submodule update --init --recursive
-```
-
-The directory that **contains** the `axbench` **package** is what must be on the path; `mcp_hypersteer.py` already extends `PYTHONPATH` for its subprocesses.
-
-## Install
-
-Use your normal AxBench / PyTorch environment. For the **HTTP server only** (from the monorepo root, where `axbench/axbench/mcp-protect/` lives):
-
-```bash
-pip install -r axbench/axbench/mcp-protect/requirements-serve.txt
-```
-
-## Neuronpedia / GemmaScope and MCP
-
-- Download data into `axbench/data/` (e.g. `download-2b.sh` / `download-9b.sh`) or set `--base-concept-json`.
-- [../../data/mcpattack.jsonl](../../data/mcpattack.jsonl) (optional) — extra steering lines; merged with Neuronpedia.
-
-**`-c` / `--concepts-16k`** and **`-a` / `--mcp-attack`** cap how many rows enter the merge (after Neuronpedia dedupe and MCP line parsing). **`--max-concepts`** is different — it is passed to **`generate.py`**.
-
-## Train, then serve (paths in this monorepo)
+This checks that **merge logic** and **YAML generation** work end-to-end for your paths:
 
 ```bash
 python axbench/mcp-protect/mcp_hypersteer.py \
-  --model gemma2b --layer 20 --dump-dir axbench/outputs/mcp_hsteer_2b
-
-python axbench/mcp-protect/mcp_hypersteer.py \
-  --model gemma2b --layer 20 -c 2000 -a 80 --dump-dir axbench/outputs/mcp_hsteer_2b_subset
+  --model gemma2b --layer 20 \
+  --skip-generate \
+  --dump-dir axbench/outputs/mcp_smoke_config
 ```
 
-**Serve** (after `train/` exists):
+**You should get:**
+
+- `axbench/outputs/mcp_smoke_config/merged_concepts_mcp.json`
+- `axbench/outputs/mcp_smoke_config/mcp_hypersteer_config.yaml` (sections: `generate`, `train`, `inference`, `evaluate`)
+
+No `OPENAI_API_KEY` and no `train/` until you run without `--skip-generate` (and then train).
+
+---
+
+## 4. Full run: generate → train
+
+From the same AxBench project root, with **`OPENAI_API_KEY`** set if the written `generate.lm_model` is an OpenAI model:
+
+```bash
+export OPENAI_API_KEY=...
+python axbench/mcp-protect/mcp_hypersteer.py \
+  --model gemma2b --layer 20 \
+  --dump-dir axbench/outputs/mcp_hsteer_2b
+```
+
+**Faster / smaller merge** (optional): `-c 2000 -a 80` (cap Neuronpedia vs MCP rows; see `--help`).
+
+**Artifacts (under `--dump-dir`):** `generate/` (parquet, `metadata.jsonl`), `train/` (e.g. `train/hyperreft/`).  
+**Iterating:** `--skip-train` runs `generate` only; `--skip-generate` is the smoke step above.
+
+---
+
+## 5. Serve (OpenAI-style local policy)
+
+After `train/` and `generate/` exist, start the **policy** server (GPU expected):
 
 ```bash
 python axbench/mcp-protect/serve_mcp_hypersteer.py \
-  --dump-dir path/to/same/outputs/run \
+  --dump-dir axbench/outputs/mcp_hsteer_2b \
   --port 8000
 ```
 
-- Default config: `<dump-dir>/mcp_hypersteer_config.yaml`.
-- Steering: `--concept-id` / `--factor` or `HYPERSTEER_*` env vars (see `serve_mcp_hypersteer.py --help`).
-
-The server prints a **base URL** with **`/v1`**. For prime-envs use **`-b http://127.0.0.1:PORT/v1`**, **`-k EMPTY`**, and do not use **`-p openrouter`** for the **steered** policy.
-
-**Skip steps:** `--skip-generate` (write merge + YAML only), `--skip-train` (run `generate` only).
-
-## Optional: AxBench `inference.py` / `evaluate.py`
-
-You can use the same YAML to validate a run before prime-envs (see upstream AxBench docs).
-
-## Memory
-
-- **2B:** most single-GPU setups. **9B:** more VRAM and/or a smaller batch.
+**Behavior (concise):** loads Gemma + HyperSteer from the run, fixes **one** steering **concept** per process (from `--concept-id` or `HYPERSTEER_CONCEPT_ID`, default: first id in `metadata.jsonl`), runs **one-rank `gloo`** so `predict_steer` works without `torchrun`, then handles **`POST /v1/chat/completions`**. It **prints** a base URL ending in **`/v1`** — use that in **prime-envs** with **`-k EMPTY`**. See `--help` for `HYPERSTEER_FACTOR`, etc.
 
 ---
 
-## Full CLI reference (`mcp_hypersteer.py`)
+## 6. CLI quick reference (`mcp_hypersteer.py`)
 
-| Option | Default | Meaning |
-|--------|---------|---------|
-| `--model` | (required) | `2b` / `9b` or `gemma2b` / `gemma9b` — model preset and default Neuronpedia JSON. |
-| `-l` / `--layer` | preset (e.g. 20) | Decoder layer for the intervention. |
-| `--base-concept-json` | from preset | Neuronpedia / GemmaScope JSON list. |
-| `-c` / `--concepts-16k` | none | Max Neuronpedia rows (after index dedupe). |
-| `-a` / `--mcp-attack` | none | Max `mcpattack.jsonl` rows. |
-| `--mcp-jsonl` | `axbench/data/mcpattack.jsonl` | JSONL to merge. |
-| `--no-mcp` | off | Neuronpedia only. |
-| `--dump-dir` | (required) | Run output directory. |
-| `--max-concepts` | none | Passed to **`generate.py`**. |
-| `--num-of-examples` | 72 | Pairs per concept. |
-| `--n-epochs` | 10 | Training epochs. |
-| `--batch-size` | 12 | Per-device batch. |
-| `--master-data-dir` | `axbench/data` | Seed data for `generate`. |
-| `--nproc-per-node` | 1 | `torchrun` processes. |
-| `--skip-generate` / `--skip-train` | | As above. |
+| Flag | Role |
+|------|------|
+| `--model` | `2b` / `9b` or `gemma2b` / `gemma9b` |
+| `-l` / `--layer` | Decoder layer (default in preset, often 20) |
+| `--base-concept-json` | Neuronpedia JSON path (else default under `axbench/data/`) |
+| `-c` / `-a` | Cap Neuronpedia vs `mcpattack` rows in the **merge** |
+| `--max-concepts` | Passed to **`generate.py`** (subsample after merge) |
+| `--dump-dir` | Run directory (required) |
+| `--skip-generate` | Only merge + YAML (smoke test) |
+| `--skip-train` | Run `generate`, not `train` |
 
-**Artifacts in `--dump-dir`:** `merged_concepts_mcp.json`, `mcp_hypersteer_config.yaml`, `generate/`, `train/` (e.g. `train/hyperreft/`).
+**GPU:** needed for a real **train** and for **serve**; **merge + YAML** with `--skip-generate` is CPU-friendly.
