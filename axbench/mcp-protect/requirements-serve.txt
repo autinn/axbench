@@ -1,0 +1,5 @@
+# Optional dependencies for axbench/mcp-protect/serve_mcp_hypersteer.py (OpenAI-compatible HTTP).
+# Install AxBench + PyTorch + transformers + pyvene for training separately.
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+pydantic>=2.0.0
