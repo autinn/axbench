@@ -36,6 +36,7 @@ try:
         Qwen3Config as _QwenConfig,
         Qwen3PreTrainedModel as _QwenPreTrainedModel,
         Qwen3RMSNorm as _QwenRMSNorm,
+        Qwen3RotaryEmbedding as _QwenRotaryEmbedding,
     )
     _QWEN_FAMILY = "qwen3"
     _NO_SPLIT_MODULES = ["Qwen3DecoderLayer", "HypernetDecoderLayerQwen"]
@@ -44,6 +45,7 @@ except ImportError:
         Qwen2Config as _QwenConfig,
         Qwen2PreTrainedModel as _QwenPreTrainedModel,
         Qwen2RMSNorm as _QwenRMSNorm,
+        Qwen2RotaryEmbedding as _QwenRotaryEmbedding,
     )
     _QWEN_FAMILY = "qwen2"
     _NO_SPLIT_MODULES = ["Qwen2DecoderLayer", "HypernetDecoderLayerQwen"]
@@ -167,6 +169,11 @@ class HypernetQwenModel(HypernetQwenPreTrainedModel):
             [HypernetDecoderLayerQwen(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
         self.norm = _QwenRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        # transformers >= 4.51 expects the model to compute rotary
+        # `position_embeddings` once per forward and thread them down to
+        # every attention call. Older transformers had this inside the
+        # attention module; we host it here regardless.
+        self.rotary_emb = _QwenRotaryEmbedding(config=config)
 
         self.regression_head = nn.Linear(config.hidden_size, config.hidden_size)
 
@@ -249,6 +256,10 @@ class HypernetQwenModel(HypernetQwenPreTrainedModel):
         # (that's a Gemma2 convention). Pass through unchanged.
         hidden_states = inputs_embeds
 
+        # Precompute rotary cos/sin once, threaded into every layer.
+        # transformers >= 4.51 requires this; <= 4.50 ignored it.
+        position_embeddings = self.rotary_emb(hidden_states, position_ids)
+
         all_hidden_states = () if output_hidden_states else None
         all_self_attns = () if output_attentions else None
 
@@ -262,6 +273,7 @@ class HypernetQwenModel(HypernetQwenPreTrainedModel):
                     hidden_states,
                     causal_mask,
                     position_ids,
+                    position_embeddings,
                     base_encoder_hidden_states,
                     base_encoder_attention_mask,
                     base_encoder_position_ids,
@@ -275,6 +287,7 @@ class HypernetQwenModel(HypernetQwenPreTrainedModel):
                     hidden_states,
                     attention_mask=causal_mask,
                     position_ids=position_ids,
+                    position_embeddings=position_embeddings,
                     base_encoder_hidden_states=base_encoder_hidden_states,
                     base_encoder_attention_mask=base_encoder_attention_mask,
                     base_encoder_position_ids=base_encoder_position_ids,
