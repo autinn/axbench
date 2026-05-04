@@ -202,17 +202,32 @@ class HypernetCrossAttentionQwen(nn.Module):
         # _update_encoder_attention_mask, also dim==2 but with -finfo.min
         # at padded positions). Detect by value range and add directly,
         # avoiding the (1-(-finfo.min)) * (-finfo.min) overflow path.
+        #
+        # During pyvene's autoregressive generate, encoder_hidden_states
+        # changes shape per step (prompt_len → 1) while encoder_attention_mask
+        # may still be the original full-prompt mask. If the mask's K
+        # dimension doesn't match the actual K we computed, fall back to
+        # no mask — single-token generation steps don't need padding.
         if encoder_attention_mask is not None:
-            emask = encoder_attention_mask
-            if emask.dim() == 2:
-                emask = emask[:, None, None, :]
-            emask_f = emask.to(torch.float32)
-            min_val = torch.finfo(torch.float32).min
-            if emask_f.min() >= 0.0:
-                # raw 0/1 mask: convert to additive
-                emask_f = (1.0 - emask_f) * min_val
-            # else: already additive (values 0 or near -finfo.min); use as-is
-            attn_weights = attn_weights + emask_f
+            mask_kv_len = encoder_attention_mask.shape[-1]
+            actual_kv_len = key_states.shape[-2]
+            if mask_kv_len != actual_kv_len:
+                logger.warning(
+                    f"[HypernetCrossAttentionQwen] encoder_attention_mask kv_len={mask_kv_len} "
+                    f"!= encoder_hidden_states kv_len={actual_kv_len}; dropping mask "
+                    f"(likely autoregressive generate step desync)"
+                )
+            else:
+                emask = encoder_attention_mask
+                if emask.dim() == 2:
+                    emask = emask[:, None, None, :]
+                emask_f = emask.to(torch.float32)
+                min_val = torch.finfo(torch.float32).min
+                if emask_f.min() >= 0.0:
+                    # raw 0/1 mask: convert to additive
+                    emask_f = (1.0 - emask_f) * min_val
+                # else: already additive (values 0 or near -finfo.min); use as-is
+                attn_weights = attn_weights + emask_f
 
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
