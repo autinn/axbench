@@ -108,7 +108,8 @@ class _ChatMessage(BaseModel):
 class _ChatCompletionsRequest(BaseModel):
     model: str = "hypersteer-local"
     messages: list[_ChatMessage] = Field(default_factory=list)
-    max_tokens: int = 1024
+    max_tokens: int | None = None
+    max_completion_tokens: int | None = None
     temperature: float = 1.0
     stream: bool = False
 
@@ -245,9 +246,29 @@ def _messages_to_prompt(
     if not messages:
         return ""
     as_objs = [{"role": m["role"], "content": m["content"]} for m in messages]
-    return tokenizer.apply_chat_template(
-        as_objs, tokenize=False, add_generation_prompt=True
-    )
+    try:
+        # Qwen3 chat template accepts enable_thinking=True; other model
+        # families either ignore it or raise on unknown kwarg.
+        try:
+            return tokenizer.apply_chat_template(
+                as_objs, tokenize=False, add_generation_prompt=True,
+                enable_thinking=True,
+            )
+        except TypeError:
+            return tokenizer.apply_chat_template(
+                as_objs, tokenize=False, add_generation_prompt=True
+            )
+    except Exception:
+        # Gemma chat template has no system role; fold system into the first user turn.
+        sys_parts = [m["content"] for m in as_objs if m["role"] == "system"]
+        rest = [m for m in as_objs if m["role"] != "system"]
+        if sys_parts and rest and rest[0]["role"] == "user":
+            rest[0] = {"role": "user", "content": "\n\n".join(sys_parts) + "\n\n" + rest[0]["content"]}
+        elif sys_parts:
+            rest = [{"role": "user", "content": "\n\n".join(sys_parts)}] + rest
+        return tokenizer.apply_chat_template(
+            rest, tokenize=False, add_generation_prompt=True
+        )
 
 
 def _serve(
@@ -311,8 +332,11 @@ def _serve(
             )
         else:
             user_prompt = req.messages[-1].content
+        # Accept either max_tokens (legacy) or max_completion_tokens (newer OpenAI).
+        # Fall back to default_max_tokens (set on serve startup) if neither given.
+        req_cap = req.max_completion_tokens if req.max_completion_tokens else req.max_tokens
         try:
-            max_toks = int(req.max_tokens) if req.max_tokens else default_max_tokens
+            max_toks = int(req_cap) if req_cap else default_max_tokens
         except (TypeError, ValueError):
             max_toks = default_max_tokens
         row = {

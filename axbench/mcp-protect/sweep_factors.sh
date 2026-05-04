@@ -69,7 +69,7 @@ run_eval() {
     --num-examples "$N" \
     --rollouts-per-example 1 \
     --max-concurrent 4 \
-    --max-tokens 512 \
+    --max-tokens 2048 \
     --temperature 0.3 \
     --save-results \
     --output-dir "$odir" \
@@ -88,4 +88,4 @@ done
 
 echo
 echo "=== SCORE ==="
-uv run python axbench/outputs/_eval_tools/score_mcp_tox.py "$OUT_ROOT"
+uv run --no-sync python axbench/outputs/_eval_tools/score_mcp_tox.py "$OUT_ROOT"
