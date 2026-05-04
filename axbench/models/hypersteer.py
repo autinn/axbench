@@ -26,6 +26,40 @@ from transformers import set_seed
 from ..scripts.inference import prepare_df
 from .hypernet.configuration_hypernet import HypernetConfig
 from .hypernet.modeling_hypernet import HypernetModel
+# Qwen variant of the hypernet — used when the policy model is Qwen-family.
+# Selected at runtime by `_pick_hypernet_for(...)` below based on the policy
+# model's HF id. Falls back to the Gemma variant for any non-Qwen policy.
+try:
+    from .hypernet.configuration_hypernet_qwen import HypernetQwenConfig
+    from .hypernet.modeling_hypernet_qwen import HypernetQwenModel
+    _QWEN_HYPERNET_AVAILABLE = True
+except Exception as _e:
+    HypernetQwenConfig = None
+    HypernetQwenModel = None
+    _QWEN_HYPERNET_AVAILABLE = False
+    _QWEN_HYPERNET_IMPORT_ERROR = _e
+
+
+def _pick_hypernet_for(model_name: str):
+    """Return (ConfigCls, ModelCls) appropriate for the given policy model id.
+
+    Rule: any model whose HF id contains 'qwen' uses the Qwen-architecture
+    hypernet; everything else uses the Gemma2-architecture hypernet (Autinn's
+    original). Case-insensitive.
+
+    Raises if Qwen is requested but the import failed (likely a transformers
+    version that has neither qwen2 nor qwen3 modeling modules).
+    """
+    name = (model_name or "").lower()
+    if "qwen" in name:
+        if not _QWEN_HYPERNET_AVAILABLE:
+            raise RuntimeError(
+                f"Qwen hypernet requested for model_name={model_name!r} but the "
+                f"Qwen modeling files failed to import: {_QWEN_HYPERNET_IMPORT_ERROR}. "
+                f"Update transformers to a version with qwen2 or qwen3 support."
+            )
+        return HypernetQwenConfig, HypernetQwenModel
+    return HypernetConfig, HypernetModel
 import torch.distributed as dist
 import json
 
@@ -137,23 +171,30 @@ class HyperSteer(Model):
             
         num_hidden_layers = kwargs.get("num_hidden_layers", 2)
         print(f"num_hidden_layers: {num_hidden_layers}")
-                
-        hypernet_config = HypernetConfig.from_pretrained(
+
+        # Pick Gemma vs Qwen variant based on the hypernet/policy model id.
+        # `hypernet_name_or_path` is what gets used for the hypernet's pretrained
+        # init; it normally matches the policy model id (Autinn's pipeline ties
+        # the two) — so e.g. "Qwen/Qwen3-8B" routes to HypernetQwen{Config,Model}.
+        _ConfigCls, _ModelCls = _pick_hypernet_for(hypernet_name_or_path)
+        print(f"Hypernet variant: {_ModelCls.__name__} for {hypernet_name_or_path!r}")
+
+        hypernet_config = _ConfigCls.from_pretrained(
             pretrained_model_name_or_path=hypernet_name_or_path,
             num_hidden_layers=num_hidden_layers,
             torch_dtype=torch.bfloat16,
             use_target_model_embedding=False,
         )
-        
+
         use_pretrained_parameter = kwargs.get("hypernet_initialize_from_pretrained", True)
         if use_pretrained_parameter:
             print(f"Loading pretrained hypernet model from {hypernet_name_or_path}")
-            self.concept_embedding = HypernetModel.from_pretrained(
+            self.concept_embedding = _ModelCls.from_pretrained(
                 hypernet_name_or_path,
                 config=hypernet_config
-            ) 
+            )
         else:
-            self.concept_embedding = HypernetModel(config=hypernet_config)
+            self.concept_embedding = _ModelCls(config=hypernet_config)
             
         self.concept_embedding = self.concept_embedding.to(self.device, dtype=torch.bfloat16)
             
