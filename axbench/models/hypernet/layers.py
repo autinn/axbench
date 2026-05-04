@@ -6,14 +6,30 @@ import torch.nn as nn
 from torch.cuda.amp import autocast
 from transformers.models.gemma2.modeling_gemma2 import (
     Gemma2Attention,
-    Gemma2FlashAttention2,
-    Gemma2SdpaAttention,
     Gemma2Config,
     Gemma2RMSNorm,
     Gemma2DecoderLayer,
     Gemma2RotaryEmbedding,
     repeat_kv,
 )
+try:
+    from transformers.models.gemma2.modeling_gemma2 import (
+        Gemma2FlashAttention2,
+        Gemma2SdpaAttention,
+    )
+except ImportError:
+    # transformers >= 4.51 unified attention backends; these dedicated
+    # subclasses no longer exist. Define stubs so the module still imports.
+    class _StubAttn:
+        def __init__(self, *a, **kw):
+            raise NotImplementedError(
+                "Gemma2FlashAttention2/Gemma2SdpaAttention were removed in "
+                "transformers >= 4.51; the Gemma hypernet attention path is "
+                "no longer supported on this transformers version. Use the "
+                "Qwen hypernet instead."
+            )
+    Gemma2FlashAttention2 = _StubAttn
+    Gemma2SdpaAttention = _StubAttn
 
 from transformers.utils import logging
 
@@ -95,6 +111,18 @@ class HypernetCrossAttention(Gemma2Attention):
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        # NaN diagnostic — fires if softmax over the policy-residual keys produced NaN.
+        # Triggered most often when bf16 logits over long key sequences underflow.
+        if torch.isnan(attn_weights).any():
+            n_nan = torch.isnan(attn_weights).sum().item()
+            n_total = attn_weights.numel()
+            logger.warning(
+                f"[HypernetCrossAttention NaN-guard] layer_idx={self.layer_idx} "
+                f"NaN in attn_weights: {n_nan}/{n_total} ({100*n_nan/n_total:.2f}%) "
+                f"q_len={hidden_states.size(1)} kv_len={encoder_hidden_states.size(1)} "
+                f"dtype={query_states.dtype}"
+            )
+            attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
         attn_output = torch.matmul(attn_weights, value_states)
         

@@ -24,8 +24,21 @@ from transformers.models.gemma2.modeling_gemma2 import (
     Gemma2DecoderLayer,
     Gemma2RotaryEmbedding,
     Gemma2MLP,
-    _prepare_4d_causal_attention_mask_with_cache_position,
 )
+try:
+    from transformers.models.gemma2.modeling_gemma2 import (
+        _prepare_4d_causal_attention_mask_with_cache_position,
+    )
+except ImportError:
+    # transformers >= 4.51 removed this internal helper from gemma2.
+    # Define a stub so this file still imports; the Gemma hypernet path
+    # will raise only if actually used at runtime.
+    def _prepare_4d_causal_attention_mask_with_cache_position(*args, **kwargs):
+        raise NotImplementedError(
+            "_prepare_4d_causal_attention_mask_with_cache_position was removed in "
+            "transformers >= 4.51; the Gemma hypernet path is no longer supported "
+            "on this transformers version. Use the Qwen hypernet instead."
+        )
 
 from transformers.utils import logging
 
