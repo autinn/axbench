@@ -163,7 +163,7 @@ def _build_hsteer(
     meta_rows = _load_metadata_rows(generate_dir)
 
     tokenizer = AutoTokenizer.from_pretrained(
-        model_name, use_fast=False, model_max_length=1024
+        model_name, use_fast=False, model_max_length=8192
     )
     tokenizer.padding_side = "right"
     need_resize = False
