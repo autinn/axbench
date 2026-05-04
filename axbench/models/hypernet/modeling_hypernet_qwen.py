@@ -123,6 +123,15 @@ class HypernetQwenPreTrainedModel(PreTrainedModel):
             module.weight.data.normal_(mean=0.0, std=std)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, _QwenRMSNorm):
+            # RMSNorm weight starts at 1.0 (identity scaling) in the
+            # constructor. `from_pretrained` allocates parameters with
+            # uninitialized memory for missing checkpoint keys and then
+            # calls this callback — without this branch, RMSNorm in newly
+            # added sub-modules (cross_attention.q_norm/k_norm,
+            # pre/post_cross_attention_layernorm) ends up as memory
+            # garbage and blows up the cross-attention to NaN at step 0.
+            module.weight.data.fill_(1.0)
 
 
 class UnembeddingMLP(nn.Module):

@@ -291,6 +291,11 @@ def main() -> int:
     }]
     (out_dir / "merged_concepts_mcp.json").write_text(json.dumps(merged, indent=2))
 
+    # Format lr so PyYAML's default 1.1 loader parses it as a float, not
+    # a string. '2e-05' is YAML 1.2 only; the 1.1 loader needs a '.' in
+    # the mantissa ('2.0e-05'). `.4e` always emits 'X.XXXXe+/-NN'.
+    lr_str = f"{args.lr:.4e}"
+
     yaml_text = HYPERSTEER_TRAIN_YAML_TEMPLATE.format(
         concept_path=str(out_dir / "merged_concepts_mcp.json"),
         policy_model=args.policy_model,
@@ -298,7 +303,7 @@ def main() -> int:
         batch_size=args.batch_size,
         grad_accum=args.grad_accum,
         n_epochs=args.n_epochs,
-        lr=args.lr,
+        lr=lr_str,
     )
     (out_dir / "mcp_hypersteer_config.yaml").write_text(yaml_text)
 

@@ -40,7 +40,7 @@ start_serve() {
   echo "[sweep] starting serve dump=$DUMP_DIR cid=$CID factor=$factor" >&2
   HYPERSTEER_CONCEPT_ID="$CID" HYPERSTEER_FACTOR="$factor" \
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    nohup uv run python axbench/mcp-protect/serve_mcp_hypersteer.py \
+    nohup uv run --no-sync python axbench/mcp-protect/serve_mcp_hypersteer.py \
       --dump-dir "$DUMP_DIR" --port 8000 --host 0.0.0.0 \
       > /tmp/serve_${TAG}_f${factor}.log 2>&1 &
   echo $! > /tmp/serve.pid
