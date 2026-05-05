@@ -300,6 +300,13 @@ def train_hypersteer(args, generate_args, model_instance, tokenizer, all_df, met
         "metadata_path": metadata_path,
         "world_size": world_size,
     }
+    # Optional per-model max_input_length / max_concept_length (default 1024 in
+    # data_utils.make_data_module). Set in YAML as models.<name>.max_input_length
+    # to allow long-form reasoning training data (e.g. v11 audit traces ~1700 tokens).
+    for opt in ("max_input_length", "max_concept_length"):
+        v = getattr(args.models[model_name], opt, None)
+        if v is not None:
+            kwargs[opt] = int(v)
     
     benchmark_model.train(full_df, **kwargs)
     if rank == 0:

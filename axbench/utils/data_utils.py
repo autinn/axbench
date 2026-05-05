@@ -173,49 +173,62 @@ class PreferenceInterventionDataCollator(object):
 
 
 def make_data_module(
-    tokenizer: transformers.PreTrainedTokenizer, df, 
+    tokenizer: transformers.PreTrainedTokenizer, df,
     dataset_category="continuation",
     positions="all", # "all_prompt" or "all" or "f1+l1" (pyreft formatting)
     exclude_bos=True,
     prefix_length=1,
-    concept_tokenizer=None, 
+    concept_tokenizer=None,
+    max_input_length=1024,    # cap on (input+output) tokens during tokenization
+    max_concept_length=1024,  # cap on concept text tokens
     **kwargs
 ):
-    """Make dataset and collator for supervised fine-tuning with kl div loss."""
+    """Make dataset and collator for supervised fine-tuning with kl div loss.
+
+    `max_input_length` was previously hardcoded to 1024, which silently
+    truncated training rows whose `input + output` exceeded that. For the
+    audit-prompted dataset (v11) ~38% of rows had input alone > 1024,
+    causing the entire output to be dropped and the row to contribute zero
+    loss. Pass `max_input_length` from the YAML config when using long-form
+    reasoning training data; default kept at 1024 for backward compat.
+    """
     if not exclude_bos:
         prefix_length = 0
-        
+
     if concept_tokenizer is None:
         concept_tokenizer = tokenizer
-    
+
     all_base_input_ids, all_intervention_locations, all_output_ids,  = [], [], []
     all_prompt_lengths = []
-    
+
     all_concept_ids, all_concept_input_ids = [], []
-    
+    n_zero_loss = 0
+
     for _, row in df.iterrows():
         _concept, _input, _output = row["output_concept"], row["input"], row["output"]
-        
+
         all_concept_ids.append(row["concept_id"])
-        
+
         # prepare input ids
         base_prompt = _input
         if isinstance(_output, float):
             _output = tokenizer.eos_token
         base_input = base_prompt + _output
         base_prompt_ids = tokenizer(
-            base_prompt, max_length=1024, truncation=True, return_tensors="pt")["input_ids"][0]
+            base_prompt, max_length=max_input_length, truncation=True, return_tensors="pt")["input_ids"][0]
         base_input_ids = tokenizer(
-            base_input, max_length=1024, truncation=True, return_tensors="pt")["input_ids"][0]
+            base_input, max_length=max_input_length, truncation=True, return_tensors="pt")["input_ids"][0]
         base_prompt_length = len(base_prompt_ids)
         base_length = len(base_input_ids)
+        if base_length <= base_prompt_length:
+            n_zero_loss += 1
 
         # output ids with prompt token mask
         output_ids = base_input_ids.clone()
         output_ids[:base_prompt_length] = -100
-        
+
         concept_input_ids = concept_tokenizer(
-            _concept, max_length=1024, truncation=True, return_tensors="pt")["input_ids"][0]
+            _concept, max_length=max_concept_length, truncation=True, return_tensors="pt")["input_ids"][0]
 
         if positions is None or positions == "all_prompt":
             intervention_locations = torch.tensor([[i for i in range(prefix_length, base_prompt_length)]])

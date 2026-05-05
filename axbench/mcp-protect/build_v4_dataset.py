@@ -73,6 +73,8 @@ train:
       hypernet_name_or_path: {policy_model}
       num_hidden_layers: 4
       hypernet_initialize_from_pretrained: true
+      max_input_length: 2500
+      max_concept_length: 1024
 inference:
   use_bf16: true
   models:
