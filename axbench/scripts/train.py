@@ -89,16 +89,39 @@ def data_generator(data_dir, use_dpo_loss=False):
                 yield (concept_id, df_subset)
 
 
+class _MetadataLookup(list):
+    """Dual-interface metadata: indexable by concept_id (dict-like, robust to
+    gaps and non-zero-based ids) AND iterable as a list (length = #concepts).
+    Original train.py code does both `metadata[concept_id]` (now dict-style on
+    the actual cid) and `for concept_id in range(...)` (now iterates the
+    sorted cid keys). Backward-compatible if cids happen to be 0..N-1 dense.
+    """
+    def __init__(self, rows):
+        # underlying ordered list of rows for iteration / for-len
+        super().__init__(rows)
+        self._by_id = {int(r["concept_id"]): r for r in rows if "concept_id" in r}
+
+    def __getitem__(self, key):
+        # If key is a concept_id we know about, return that row; otherwise fall
+        # back to plain list indexing for code paths that index by position.
+        if isinstance(key, int) and key in self._by_id:
+            return self._by_id[key]
+        return super().__getitem__(key)
+
+
 def load_metadata(metadata_path):
     """
-    Load metadata from a JSON lines file.
+    Load metadata from a JSON lines file. Returns a list-like with dict-keyed
+    lookup on concept_id (so `metadata[concept_id]` works regardless of whether
+    cids are 0..N-1 contiguous).
     """
-    metadata = []
+    rows = []
     with open(metadata_path, 'r') as f:
         for line in f:
-            data = json.loads(line)
-            metadata += [data]  # Return the metadata as is
-    return metadata
+            line = line.strip()
+            if not line: continue
+            rows.append(json.loads(line))
+    return _MetadataLookup(rows)
 
 
 def prepare_df(
