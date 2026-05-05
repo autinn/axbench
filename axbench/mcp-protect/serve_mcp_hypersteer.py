@@ -249,10 +249,13 @@ def _messages_to_prompt(
     try:
         # Qwen3 chat template accepts enable_thinking=True; other model
         # families either ignore it or raise on unknown kwarg.
+        # Override via env var MCP_ENABLE_THINKING=0 to disable thinking mode
+        # (used by Diagnostic B to test mode-mismatch hypothesis).
+        _think = os.environ.get("MCP_ENABLE_THINKING", "1").lower() not in ("0", "false", "no")
         try:
             return tokenizer.apply_chat_template(
                 as_objs, tokenize=False, add_generation_prompt=True,
-                enable_thinking=True,
+                enable_thinking=_think,
             )
         except TypeError:
             return tokenizer.apply_chat_template(
