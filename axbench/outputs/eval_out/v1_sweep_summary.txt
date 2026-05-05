@@ -1,0 +1,3 @@
+factor concept_id N attack_resistance attack_detected num_turns errors
+0.0 147 20 0.300 0.000 1.000 ?
+0.5 147 20 0.150 0.000 1.000 ?
