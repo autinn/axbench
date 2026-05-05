@@ -105,64 +105,14 @@ class HypernetCrossAttentionQwen(nn.Module):
         bsz, q_len, _ = hidden_states.size()
         _, kv_len, _ = encoder_hidden_states.size()
 
-        # One-shot diagnostic: log magnitudes and NaN status of inputs the
-        # FIRST time this layer's forward runs. Fires before any computation
-        # so we can tell whether NaN comes from input or from us.
-        if not getattr(self, "_diag_printed", False):
-            with torch.no_grad():
-                hs_finite = torch.isfinite(hidden_states).all().item()
-                eh_finite = torch.isfinite(encoder_hidden_states).all().item()
-                logger.warning(
-                    f"[XAttn DIAG layer={self.layer_idx}] "
-                    f"hidden_states: dtype={hidden_states.dtype} shape={tuple(hidden_states.shape)} "
-                    f"finite={hs_finite} abs.max={hidden_states.abs().max().item():.3g} "
-                    f"abs.mean={hidden_states.abs().mean().item():.3g}"
-                )
-                logger.warning(
-                    f"[XAttn DIAG layer={self.layer_idx}] "
-                    f"encoder_hs: dtype={encoder_hidden_states.dtype} shape={tuple(encoder_hidden_states.shape)} "
-                    f"finite={eh_finite} abs.max={encoder_hidden_states.abs().max().item():.3g} "
-                    f"abs.mean={encoder_hidden_states.abs().mean().item():.3g}"
-                )
-                # Also check our weights
-                qw = self.q_proj.weight
-                kw = self.k_proj.weight
-                qnw = self.q_norm.weight if hasattr(self.q_norm, "weight") else None
-                logger.warning(
-                    f"[XAttn DIAG layer={self.layer_idx}] "
-                    f"q_proj.w: finite={torch.isfinite(qw).all().item()} abs.max={qw.abs().max().item():.3g}; "
-                    f"k_proj.w: finite={torch.isfinite(kw).all().item()} abs.max={kw.abs().max().item():.3g}; "
-                    f"q_norm.w: " + (f"finite={torch.isfinite(qnw).all().item()} abs.max={qnw.abs().max().item():.3g}" if qnw is not None else "Identity")
-                )
-            self._diag_printed = True
-
         query_states = self.q_proj(hidden_states).view(bsz, q_len, self.num_heads, self.head_dim)
         key_states = self.k_proj(encoder_hidden_states).view(bsz, kv_len, self.num_key_value_heads, self.head_dim)
         value_states = self.v_proj(encoder_hidden_states).view(bsz, kv_len, self.num_key_value_heads, self.head_dim)
-
-        # Diag: post-projection
-        if not getattr(self, "_diag2_printed", False):
-            with torch.no_grad():
-                logger.warning(
-                    f"[XAttn DIAG2 layer={self.layer_idx}] "
-                    f"Q post-proj: finite={torch.isfinite(query_states).all().item()} abs.max={query_states.abs().max().item():.3g}; "
-                    f"K post-proj: finite={torch.isfinite(key_states).all().item()} abs.max={key_states.abs().max().item():.3g}"
-                )
-            self._diag2_printed = True
 
         # Qwen3 q_norm/k_norm act on the per-head dim (last axis), pre-transpose
         query_states = self.q_norm(query_states).transpose(1, 2)  # (B, nh, q_len, head_dim)
         key_states = self.k_norm(key_states).transpose(1, 2)      # (B, nkv, kv_len, head_dim)
         value_states = value_states.transpose(1, 2)               # (B, nkv, kv_len, head_dim)
-
-        if not getattr(self, "_diag3_printed", False):
-            with torch.no_grad():
-                logger.warning(
-                    f"[XAttn DIAG3 layer={self.layer_idx}] "
-                    f"Q post-norm: finite={torch.isfinite(query_states).all().item()} abs.max={query_states.abs().max().item():.3g}; "
-                    f"K post-norm: finite={torch.isfinite(key_states).all().item()} abs.max={key_states.abs().max().item():.3g}"
-                )
-            self._diag3_printed = True
 
         # Apply rotary to Q only. K positions are encoder positions and
         # should not be rotated against Q's coordinate system in cross-attn.
@@ -212,11 +162,10 @@ class HypernetCrossAttentionQwen(nn.Module):
             mask_kv_len = encoder_attention_mask.shape[-1]
             actual_kv_len = key_states.shape[-2]
             if mask_kv_len != actual_kv_len:
-                logger.warning(
-                    f"[HypernetCrossAttentionQwen] encoder_attention_mask kv_len={mask_kv_len} "
-                    f"!= encoder_hidden_states kv_len={actual_kv_len}; dropping mask "
-                    f"(likely autoregressive generate step desync)"
-                )
+                # Expected during pyvene autoregressive generate (per-step shape change).
+                # Was previously a logger.warning; downgraded to debug to avoid log spam
+                # (fires on every layer × every token × every concurrent request).
+                pass
             else:
                 emask = encoder_attention_mask
                 if emask.dim() == 2:
