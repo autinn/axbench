@@ -1,12 +1,22 @@
-# C5/D2 — sample efficiency: 25% subsample of v17's 141-row training data
-# (35 rows: 29 positive + 6 negative; seed=42 stratified). Same hyperparams as v17.
-# Output dir convention: outputs/mcp_hsteer_qwen3_8b_d2_v17_25pct
+# Phase G — broad-concept HyperSteer for concept-space search at inference.
+#
+# §15 of EXPERIMENT_HANDOFF.md. ~398 in-domain concepts (12 v22 archetypes +
+# paraphrases + generic security + refusal patterns + benign tool-use awareness
+# + AxBench-style background). Target ~7-8K filtered rows from ~12K raw.
+#
+# Hyperparameters identical to v22/v23 (HyperSteer L20, rank-1 addition, lr=2e-5,
+# 5 epochs, max_input_length=2048, max_concept_length=1024). Only meaningful
+# difference vs. v23: max_concepts bumped to cover all ~400 trained cids.
+#
+# Train output dir (Box B convention): axbench/outputs/mcp_hsteer_qwen3_8b_vG_broad/
+# Concept file:                        axbench/data/vG_concepts.jsonl
+# Train data:                          axbench/data/vG_train_data.parquet
 generate:
   lm_model: openai/gpt-5.4-nano
   input_length: 32
   output_length: 32
   num_of_examples: 1
-  concept_path: /home/ubuntu/mcp-protect/axbench/axbench/outputs/mcp_hsteer_qwen3_8b_v17_terse/merged_concepts_mcp.json
+  concept_path: /home/ubuntu/mcp-protect/axbench/axbench/data/vG_concepts.jsonl
   dataset_category: instruction
   master_data_dir: axbench/data
   seed: 42
@@ -18,7 +28,7 @@ train:
   seed: 42
   use_bf16: true
   output_length: 2048
-  max_concepts: 1
+  max_concepts: 400
   models:
     HyperSteer:
       batch_size: 8
