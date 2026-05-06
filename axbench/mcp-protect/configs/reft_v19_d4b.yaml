@@ -1,54 +1,47 @@
-# D4b: plain ReFT-CE (LoReFT) on v19 (terse no-<think>) at L20.
-# Identical to D4a except concept/data path points at the v19 run (no <think>
-# in the y_pos demonstrations).
-
 generate:
-  lm_model: openai/gpt-5.4-nano
-  input_length: 32
-  output_length: 32
-  num_of_examples: 1
   concept_path: /home/ubuntu/mcp-protect/axbench/axbench/outputs/mcp_hsteer_qwen3_8b_v19_nothink/merged_concepts_mcp.json
   dataset_category: instruction
-  master_data_dir: axbench/data
-  seed: 42
+  input_length: 32
   keep_orig_axbench_format: true
-
-train:
-  model_name: Qwen/Qwen3-8B
-  layer: 20
-  component: res
+  lm_model: openai/gpt-5.4-nano
+  master_data_dir: axbench/data
+  num_of_examples: 1
+  output_length: 32
   seed: 42
-  use_bf16: true
+inference:
+  lm_model: openai/gpt-5.4-nano
+  master_data_dir: axbench/data
+  model_name: Qwen/Qwen3-8B
+  models:
+  - LoReFT
   output_length: 2048
+  seed: 42
+  steering_intervention_type: addition
+  steering_layers:
+  - 20
+  steering_model_name: Qwen/Qwen3-8B
+  temperature: 1.0
+  use_bf16: true
+train:
+  component: res
+  layer: 20
   max_concepts: 1
+  model_name: Qwen/Qwen3-8B
   models:
     LoReFT:
-      batch_size: 16
+      batch_size: 8
+      binarize_dataset: false
+      exclude_bos: true
       gradient_accumulation_steps: 1
-      n_epochs: 5
-      lr: 2.0000e-05
-      weight_decay: 0.0
       low_rank_dimension: 1
-      reft_layers: [20]
+      lr: 2.0e-05
+      n_epochs: 5
+      reft_layers:
+      - 20
       reft_positions: all
       reft_type: Loreft
-      intervention_positions: all
-      intervention_type: addition
-      binarize_dataset: false
       train_on_negative: false
-      exclude_bos: true
-
-inference:
-  use_bf16: true
-  models:
-    - LoReFT
-  model_name: Qwen/Qwen3-8B
+      weight_decay: 0.0
   output_length: 2048
-  steering_intervention_type: addition
-  steering_model_name: Qwen/Qwen3-8B
-  steering_layers:
-    - 20
-  master_data_dir: axbench/data
   seed: 42
-  lm_model: openai/gpt-5.4-nano
-  temperature: 1.0
+  use_bf16: true
