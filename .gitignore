@@ -3,6 +3,12 @@ axbench/concept500_v1/
 axbench/hypersteer_paper_results/
 axbench/removing_results/
 axbench/data/Feature-Descriptions
+# trained-hypernet weights (3GB+ each — sync to local but never commit; GitHub 100MB cap)
+axbench/outputs/_synced_weights/
+axbench/outputs/**/hyperreft/model.safetensors
+axbench/outputs/**/.model.safetensors.*
+# rsync temp files
+**/.model.safetensors.??????????
 tmp*
 axbench/pls_results
 axbench/concept16k_v2/prod_2b_l20_gemma_65k/
