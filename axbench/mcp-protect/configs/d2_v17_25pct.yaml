@@ -1,0 +1,53 @@
+# C5/D2 — sample efficiency: 25% subsample of v17's 141-row training data
+# (35 rows: 29 positive + 6 negative; seed=42 stratified). Same hyperparams as v17.
+# Output dir convention: outputs/mcp_hsteer_qwen3_8b_d2_v17_25pct
+generate:
+  lm_model: openai/gpt-5.4-nano
+  input_length: 32
+  output_length: 32
+  num_of_examples: 1
+  concept_path: /home/ubuntu/mcp-protect/axbench/axbench/outputs/mcp_hsteer_qwen3_8b_v17_terse/merged_concepts_mcp.json
+  dataset_category: instruction
+  master_data_dir: axbench/data
+  seed: 42
+  keep_orig_axbench_format: true
+train:
+  model_name: Qwen/Qwen3-8B
+  layer: 20
+  component: res
+  seed: 42
+  use_bf16: true
+  output_length: 2048
+  max_concepts: 1
+  models:
+    HyperSteer:
+      batch_size: 1
+      gradient_accumulation_steps: 8
+      n_epochs: 5
+      lr: 2.0000e-05
+      weight_decay: 0.0
+      low_rank_dimension: 1
+      intervention_positions: all
+      intervention_type: addition
+      binarize_dataset: false
+      train_on_negative: false
+      exclude_bos: true
+      hypernet_name_or_path: Qwen/Qwen3-8B
+      num_hidden_layers: 4
+      hypernet_initialize_from_pretrained: true
+      max_input_length: 2048
+      max_concept_length: 1024
+inference:
+  use_bf16: true
+  models:
+    - HyperSteer
+  model_name: Qwen/Qwen3-8B
+  output_length: 2048
+  steering_intervention_type: addition
+  steering_model_name: Qwen/Qwen3-8B
+  steering_layers:
+    - 20
+  master_data_dir: axbench/data
+  seed: 42
+  lm_model: openai/gpt-5.4-nano
+  temperature: 1.0

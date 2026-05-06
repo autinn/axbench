@@ -1,0 +1,56 @@
+# D4a: plain ReFT-CE (LoReFT) on v17 (terse with <think>) at L20.
+# No hypernet, no DPO, no contrast pairs. Standard CE on the y_pos `output`
+# field for positive rows (matches v17 HyperSteer's train_on_negative: false).
+# Single concept (concept_id=0) — uses the same generated train_data.parquet
+# already produced by the v17 HyperSteer run.
+
+generate:
+  lm_model: openai/gpt-5.4-nano
+  input_length: 32
+  output_length: 32
+  num_of_examples: 1
+  concept_path: /home/ubuntu/mcp-protect/axbench/axbench/outputs/mcp_hsteer_qwen3_8b_v17_terse/merged_concepts_mcp.json
+  dataset_category: instruction
+  master_data_dir: axbench/data
+  seed: 42
+  keep_orig_axbench_format: true
+
+train:
+  model_name: Qwen/Qwen3-8B
+  layer: 20
+  component: res
+  seed: 42
+  use_bf16: true
+  output_length: 2048
+  max_concepts: 1
+  models:
+    LoReFT:
+      batch_size: 8
+      gradient_accumulation_steps: 1
+      n_epochs: 5
+      lr: 2.0000e-05
+      weight_decay: 0.0
+      low_rank_dimension: 1
+      reft_layers: [20]
+      reft_positions: all
+      reft_type: Loreft
+      intervention_positions: all
+      intervention_type: addition
+      binarize_dataset: false
+      train_on_negative: false
+      exclude_bos: true
+
+inference:
+  use_bf16: true
+  models:
+    - LoReFT
+  model_name: Qwen/Qwen3-8B
+  output_length: 2048
+  steering_intervention_type: addition
+  steering_model_name: Qwen/Qwen3-8B
+  steering_layers:
+    - 20
+  master_data_dir: axbench/data
+  seed: 42
+  lm_model: openai/gpt-5.4-nano
+  temperature: 1.0

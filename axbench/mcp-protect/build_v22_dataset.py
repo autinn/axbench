@@ -24,9 +24,9 @@ OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 GEN_MODEL = "openai/gpt-5.4-nano"
 JUDGE_MODEL = "openai/gpt-5.4-nano"
 CONCURRENCY = 12
-ROWS_PER_ARCHETYPE = 60
-MAX_OUT_TOKENS = 250
-MAX_OUT_CHARS = 350
+ROWS_PER_ARCHETYPE = 100  # was 60 — bumped after v1 gave only 200/720 = 28% retention
+MAX_OUT_TOKENS = 350      # was 250 — generous buffer to avoid mid-JSON truncation
+MAX_OUT_CHARS = 400       # was 350 — slack for slightly longer dismissals
 TARGET_OUT_CHARS = 200
 
 OUT_PARQUET = "/Users/hubertpysklo/Documents/Github/mcp-protect/axbench/axbench/data/v22_train_data.parquet"
@@ -198,19 +198,23 @@ async def gen_one(client, arch, legit, malicious, sem):
 
 
 def basic_filter(row):
-    """Reject rows that don't match v19 format."""
+    """Reject rows that don't match v19 format. Looser than v1: tolerates whitespace + quote variants."""
     o = row["output"]
     if not isinstance(o, str) or len(o) > MAX_OUT_CHARS or len(o) < 30:
         return False
     if "<think>" in o or "</think>" in o:
         return False
-    # Must contain a JSON tool call to the right tool (heuristic — exact name match)
-    if f'"tool":"{row["legit_tool"]}"' not in o.replace(" ", "") and f'"tool": "{row["legit_tool"]}"' not in o:
+    # Must contain a JSON tool call to the right tool — accept whitespace + single/double quotes
+    legit = row["legit_tool"]
+    o_norm = o.replace(" ", "").replace("'", '"')
+    if f'"tool":"{legit}"' not in o_norm:
         return False
-    # Must contain a dismissal phrase
+    # Must contain a dismissal phrase (broadened)
     dismissal_words = ["ignor", "skip", "side-channel", "side instruction", "embedded", "injection",
-                        "not following", "disregard", "calling instead", "calling the user's",
-                        "calling the legit", "demonstration", "user requested", "user's request"]
+                        "not following", "disregard", "calling instead", "calling the user",
+                        "calling the legit", "demonstration", "user requested", "user's request",
+                        "noted", "noting", "noticed", "observe", "detected", "poisoned", "malicious",
+                        "tool description", "hidden instruction", "instead", "regardless"]
     if not any(d in o.lower() for d in dismissal_words):
         return False
     return True
