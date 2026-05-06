@@ -25,7 +25,7 @@ train:
   max_concepts: 1
   models:
     LoReFT:
-      batch_size: 8
+      batch_size: 16
       gradient_accumulation_steps: 1
       n_epochs: 5
       lr: 2.0000e-05
