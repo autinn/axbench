@@ -221,3 +221,7 @@ cython_debug/
 *.pkl
 *.pdf
 axbench/scripts/paper/
+
+# accidentally-doubled-prefix paths from earlier sync (files actually live at axbench/outputs/...)
+axbench/axbench/outputs/**/hyperreft/model.safetensors
+axbench/axbench/outputs/**/.model.safetensors.*
